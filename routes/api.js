@@ -12,6 +12,11 @@ router.get('/week', function(req, res) {
   res.json(rows);
 });
 
+router.get('/day', function(req, res) {
+  const rows = db.prepare("SELECT * FROM days WHERE DATE(date) == ?").all(req.query.date);
+  res.json(rows[0]);
+});
+
 router.post('/day', function(req, res) {
   const result = db.prepare("INSERT INTO days(date, breakfast, lunch, dinner) VALUES(?, ?, ?, ?) ON CONFLICT(date) DO UPDATE SET breakfast=coalesce(excluded.breakfast, breakfast), lunch=coalesce(excluded.lunch, lunch), dinner=coalesce(excluded.dinner, dinner)").run(req.body.date, req.body.breakfast, req.body.lunch, req.body.dinner);
 
