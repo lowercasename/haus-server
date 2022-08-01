@@ -8,7 +8,7 @@ import Database from 'better-sqlite3';
 const db = new Database('haus.db');
 
 router.get('/week', function(req, res) {
-  const rows = db.prepare("SELECT * FROM days WHERE DATE(date) >= DATE(?, 'weekday 0', '-6 days') AND DATE(date) <= DATE(?, 'weekday 0', '-6 days', '+6 days')").all(req.query.date, req.query.date);
+  const rows = db.prepare("SELECT * FROM days WHERE DATE(date) >= DATE(?, 'weekday 6', '-6 days') AND DATE(date) <= DATE(?, 'weekday 6')").all(req.query.date, req.query.date);
   res.json(rows);
 });
 
@@ -24,7 +24,7 @@ router.post('/day', function(req, res) {
 });
 
 router.get('/notes', function(req, res) {
-  const rows = db.prepare("SELECT * FROM notes WHERE DATE(date) >= DATE(?, 'weekday 0', '-6 days') AND DATE(date) <= DATE(?, 'weekday 0', '-6 days', '+6 days')").get(req.query.date, req.query.date);
+  const rows = db.prepare("SELECT * FROM notes WHERE DATE(date) >= DATE(?, 'weekday 6', '-6 days') AND DATE(date) <= DATE(?, 'weekday 6')").get(req.query.date, req.query.date);
   res.json(rows);
 });
 
@@ -35,7 +35,7 @@ router.post('/notes', function(req, res) {
 });
 
 router.get('/todo', (req, res) => {
-  const rows = db.prepare("SELECT * FROM todos WHERE DATE(date) >= DATE(?, 'weekday 0', '-6 days') AND DATE(date) <= DATE(?, 'weekday 0', '-6 days', '+6 days')").all(req.query.date, req.query.date);
+  const rows = db.prepare("SELECT * FROM todos WHERE DATE(date) >= DATE(?, 'weekday 6', '-6 days') AND DATE(date) <= DATE(?, 'weekday 6')").all(req.query.date, req.query.date);
   res.json(rows);
 });
 
@@ -60,7 +60,7 @@ router.delete('/todo', (req, res) => {
 });
 
 router.get('/shopping', (req, res) => {
-  const rows = db.prepare("SELECT * FROM shopping WHERE DATE(date) >= DATE(?, 'weekday 0', '-6 days') AND DATE(date) <= DATE(?, 'weekday 0', '-6 days', '+6 days')").all(req.query.date, req.query.date);
+  const rows = db.prepare("SELECT * FROM shopping WHERE DATE(date) >= DATE(?, 'weekday 6', '-6 days') AND DATE(date) <= DATE(?, 'weekday 6')").all(req.query.date, req.query.date);
   res.json(rows);
 });
 
