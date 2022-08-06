@@ -1,28 +1,28 @@
-import express from 'express';
+import express from "express";
 
-import urlExist from 'url-exist';
-import getMetaData from 'metadata-scraper';
+import urlExist from "url-exist";
+import getMetaData from "metadata-scraper";
 
-import { Sequelize, DataTypes, Op } from 'sequelize';
-import callAuth0Api from '../lib/auth0.js';
+import { Sequelize, DataTypes, Op } from "sequelize";
+import callAuth0Api from "../lib/auth0.js";
 
 const router = express.Router();
 
 const sequelize = new Sequelize({
-  dialect: 'sqlite',
-  storage: 'haus.db',
+  dialect: "sqlite",
+  storage: "haus.db",
 });
-const FoodPlan = sequelize.define('FoodPlan', {
+const FoodPlan = sequelize.define("FoodPlan", {
   date: { type: DataTypes.DATE, allowNull: false, unique: true },
   breakfast: DataTypes.TEXT,
   lunch: DataTypes.TEXT,
   dinner: DataTypes.TEXT,
 });
-const Note = sequelize.define('Note', {
+const Note = sequelize.define("Note", {
   date: { type: DataTypes.DATE, allowNull: false, unique: true },
   content: DataTypes.TEXT,
 });
-const Task = sequelize.define('Task', {
+const Task = sequelize.define("Task", {
   date: { type: DataTypes.DATE, allowNull: false },
   content: DataTypes.TEXT,
   done: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
@@ -30,11 +30,11 @@ const Task = sequelize.define('Task', {
   person: DataTypes.STRING,
   dueDate: DataTypes.DATE,
 });
-const RecipeCategory = sequelize.define('RecipeCategory', {
+const RecipeCategory = sequelize.define("RecipeCategory", {
   name: DataTypes.STRING,
   order: DataTypes.NUMBER,
 });
-const Recipe = sequelize.define('Recipe', {
+const Recipe = sequelize.define("Recipe", {
   description: DataTypes.TEXT,
   domain: DataTypes.STRING,
   image: DataTypes.STRING,
@@ -57,10 +57,12 @@ const getNextSaturday = (date = new Date()) => {
   nextSaturday.setDate(previousSunday.getDate() + 6);
   return nextSaturday;
 };
-const pick = (obj, keys) => keys.map((k) => (k in obj ? { [k]: obj[k] } : {}))
-  .reduce((res, o) => Object.assign(res, o), {});
+const pick = (obj, keys) =>
+  keys
+    .map((k) => (k in obj ? { [k]: obj[k] } : {}))
+    .reduce((res, o) => Object.assign(res, o), {});
 
-router.get('/food-plan', async (req, res) => {
+router.get("/food-plan", async (req, res) => {
   const date = req.query.date ? new Date(req.query.date) : new Date();
   const foodPlans = await FoodPlan.findAll({
     where: {
@@ -72,7 +74,7 @@ router.get('/food-plan', async (req, res) => {
   res.json(foodPlans);
 });
 
-router.post('/food-plan', async (req, res) => {
+router.post("/food-plan", async (req, res) => {
   await FoodPlan.upsert(
     {
       date: req.body.date,
@@ -84,13 +86,13 @@ router.post('/food-plan', async (req, res) => {
       where: {
         date: req.body.date,
       },
-    },
+    }
   );
 
-  res.send({ message: 'Data posted successfully.' });
+  res.send({ message: "Data posted successfully." });
 });
 
-router.get('/note', async (req, res) => {
+router.get("/note", async (req, res) => {
   const date = req.query.date ? new Date(req.query.date) : new Date();
   const notes = await Note.findOne({
     where: {
@@ -102,7 +104,7 @@ router.get('/note', async (req, res) => {
   res.json(notes);
 });
 
-router.post('/note', async (req, res) => {
+router.post("/note", async (req, res) => {
   await Note.upsert(
     {
       date: req.body.date,
@@ -112,29 +114,29 @@ router.post('/note', async (req, res) => {
       where: {
         date: req.body.date,
       },
-    },
+    }
   );
 
-  res.send({ message: 'Data posted successfully.' });
+  res.send({ message: "Data posted successfully." });
 });
 
 // Handles all task types (food, shopping, and general)
-router.get('/task', async (req, res) => {
+router.get("/task", async (req, res) => {
   const date = req.query.date ? new Date(req.query.date) : false;
   const tasks = await Task.findAll({
     where: date
       ? {
-        date: {
-          [Op.between]: [getPreviousSunday(date), getNextSaturday(date)],
-        },
-        type: req.query.type,
-      }
+          date: {
+            [Op.between]: [getPreviousSunday(date), getNextSaturday(date)],
+          },
+          type: req.query.type,
+        }
       : { type: req.query.type },
   });
   res.json(tasks);
 });
 
-router.post('/task', async (req, res) => {
+router.post("/task", async (req, res) => {
   const task = await Task.create({
     date: req.body.date,
     content: req.body.content,
@@ -145,12 +147,12 @@ router.post('/task', async (req, res) => {
   });
 
   res.send({
-    message: 'Data posted successfully.',
+    message: "Data posted successfully.",
     id: task.id,
   });
 });
 
-router.put('/task', async (req, res) => {
+router.put("/task", async (req, res) => {
   await Task.update(
     {
       date: req.body.date,
@@ -164,22 +166,22 @@ router.put('/task', async (req, res) => {
       where: {
         id: req.body.id,
       },
-    },
+    }
   );
 
-  res.send({ message: 'Data posted successfully.' });
+  res.send({ message: "Data posted successfully." });
 });
 
-router.delete('/task', async (req, res) => {
+router.delete("/task", async (req, res) => {
   await Task.destroy({ where: { id: req.query.id } });
 
-  res.send({ message: 'Data posted successfully.' });
+  res.send({ message: "Data posted successfully." });
 });
 
-router.get('/user/:id?', async (req, res) => {
+router.get("/user/:id?", async (req, res) => {
   try {
     const response = await callAuth0Api({
-      endpoint: req.params.id ? `users/${req.params.id}` : 'users',
+      endpoint: req.params.id ? `users/${req.params.id}` : "users",
     });
     if (!Array.isArray(response)) {
       const user = {
@@ -200,34 +202,36 @@ router.get('/user/:id?', async (req, res) => {
     }));
     return res.json(users);
   } catch (error) {
-    return res.status(500).send({ error: 'Unexpected error retrieving users.' });
+    return res
+      .status(500)
+      .send({ error: "Unexpected error retrieving users." });
   }
 });
 
-router.put('/user/:id', async (req, res) => {
-  const data = pick(req.body, ['given_name', 'family_name']);
+router.put("/user/:id", async (req, res) => {
+  const data = pick(req.body, ["given_name", "family_name"]);
   try {
     await callAuth0Api({
-      method: 'PATCH',
+      method: "PATCH",
       endpoint: `users/${req.params.id}`,
       data,
     });
-    res.send({ message: 'User updated sucessfully.' });
+    res.send({ message: "User updated sucessfully." });
   } catch (error) {
-    res.status(500).send({ error: 'Unexpected error updating user.' });
+    res.status(500).send({ error: "Unexpected error updating user." });
   }
 });
 
-router.get('/recipe', async (req, res) => {
+router.get("/recipe", async (req, res) => {
   const recipes = await Recipe.findAll();
   res.json(recipes);
 });
 
-router.post('/recipe', async (req, res) => {
+router.post("/recipe", async (req, res) => {
   const urlExists = await urlExist(req.body.url.trim());
 
   if (!urlExists) {
-    return res.send({ error: 'URL is not valid.' });
+    return res.send({ error: "URL is not valid." });
   }
 
   try {
@@ -239,47 +243,47 @@ router.post('/recipe', async (req, res) => {
       title: previewData.title,
       description: previewData.description,
       image: previewData.image,
-      domain: new URL(req.body.url.trim()).hostname.replace('www.', ''),
+      domain: new URL(req.body.url.trim()).hostname.replace("www.", ""),
     });
     const associatedCategory = await RecipeCategory.findByPk(req.body.category);
     if (associatedCategory) {
       recipe.setRecipeCategory(associatedCategory);
     }
 
-    res.send({
-      message: 'Data posted successfully.',
+    return res.send({
+      message: "Data posted successfully.",
       record: recipe,
     });
   } catch (error) {
     console.log(error);
-    res.send({ error: 'Unexpected error adding recipe.' });
+    return res.send({ error: "Unexpected error adding recipe." });
   }
 });
 
-router.delete('/recipe', async (req, res) => {
+router.delete("/recipe", async (req, res) => {
   await Recipe.destroy({ where: { id: req.query.id } });
-  res.send({ message: 'Data posted successfully.' });
+  res.send({ message: "Data posted successfully." });
 });
 
-router.get('/recipe-category', async (req, res) => {
+router.get("/recipe-category", async (req, res) => {
   const categories = await RecipeCategory.findAll();
   res.json(categories);
 });
 
-router.post('/recipe-category', async (req, res) => {
+router.post("/recipe-category", async (req, res) => {
   const category = await RecipeCategory.create({
     name: req.body.name,
   });
 
   res.send({
-    message: 'Data posted successfully.',
+    message: "Data posted successfully.",
     id: category.id,
   });
 });
 
-router.delete('/recipe-category', async (req, res) => {
+router.delete("/recipe-category", async (req, res) => {
   await RecipeCategory.destroy({ where: { id: req.query.id } });
-  res.send({ message: 'Data posted successfully.' });
+  res.send({ message: "Data posted successfully." });
 });
 
 export default router;
