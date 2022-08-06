@@ -1,9 +1,11 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-const app = express();
-const port = process.env.PORT || 8080;
 
 import apiRouter from './routes/api.js';
+
+const app = express();
+const port = process.env.PORT || 8080;
 
 app.use(cors());
 
@@ -19,6 +21,4 @@ console.log(`Running in ${process.env.NODE_ENV}`);
 
 app.listen(port, () => {
   console.log(`Haus server listening on port ${port}`);
-})
-
-
+});

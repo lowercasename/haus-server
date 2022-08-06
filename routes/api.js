@@ -1,95 +1,229 @@
 import express from 'express';
+
+import urlExist from 'url-exist';
+import getMetaData from 'metadata-scraper';
+
+import { Sequelize, DataTypes, Op } from 'sequelize';
+import callAuth0Api from '../lib/auth0.js';
+
 const router = express.Router();
 
-import urlExist from "url-exist";
-import linkPreviewGenerator from "link-preview-generator";
+const sequelize = new Sequelize({
+  dialect: 'sqlite',
+  storage: 'haus.db',
+});
+const FoodPlan = sequelize.define('FoodPlan', {
+  date: { type: DataTypes.DATE, allowNull: false, unique: true },
+  breakfast: DataTypes.TEXT,
+  lunch: DataTypes.TEXT,
+  dinner: DataTypes.TEXT,
+});
+const Note = sequelize.define('Note', {
+  date: { type: DataTypes.DATE, allowNull: false, unique: true },
+  content: DataTypes.TEXT,
+});
+const Task = sequelize.define('Task', {
+  date: { type: DataTypes.DATE, allowNull: false },
+  content: DataTypes.TEXT,
+  done: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  type: { type: DataTypes.STRING, allowNull: false },
+  person: DataTypes.STRING,
+  dueDate: DataTypes.DATE,
+});
+const RecipeCategory = sequelize.define('RecipeCategory', {
+  name: DataTypes.STRING,
+  order: DataTypes.NUMBER,
+});
+const Recipe = sequelize.define('Recipe', {
+  description: DataTypes.TEXT,
+  domain: DataTypes.STRING,
+  image: DataTypes.STRING,
+  title: DataTypes.STRING,
+  url: DataTypes.STRING,
+});
+RecipeCategory.hasMany(Recipe);
+Recipe.belongsTo(RecipeCategory);
+await sequelize.sync();
 
-import Database from 'better-sqlite3';
-const db = new Database('haus.db');
+const getPreviousSunday = (date = new Date()) => {
+  if (date.getDay() === 0) return date;
+  const previousSunday = new Date();
+  previousSunday.setDate(date.getDate() - date.getDay());
+  return previousSunday;
+};
+const getNextSaturday = (date = new Date()) => {
+  const previousSunday = getPreviousSunday(date);
+  const nextSaturday = new Date(previousSunday);
+  nextSaturday.setDate(previousSunday.getDate() + 6);
+  return nextSaturday;
+};
+const pick = (obj, keys) => keys.map((k) => (k in obj ? { [k]: obj[k] } : {}))
+  .reduce((res, o) => Object.assign(res, o), {});
 
-router.get('/week', function(req, res) {
-  const rows = db.prepare("SELECT * FROM days WHERE DATE(date) >= DATE(?, 'weekday 6', '-6 days') AND DATE(date) <= DATE(?, 'weekday 6')").all(req.query.date, req.query.date);
-  res.json(rows);
+router.get('/food-plan', async (req, res) => {
+  const date = req.query.date ? new Date(req.query.date) : new Date();
+  const foodPlans = await FoodPlan.findAll({
+    where: {
+      date: {
+        [Op.between]: [getPreviousSunday(date), getNextSaturday(date)],
+      },
+    },
+  });
+  res.json(foodPlans);
 });
 
-router.get('/day', function(req, res) {
-  const rows = db.prepare("SELECT * FROM days WHERE DATE(date) == ?").all(req.query.date);
-  res.json(rows[0]);
-});
-
-router.post('/day', function(req, res) {
-  const result = db.prepare("INSERT INTO days(date, breakfast, lunch, dinner) VALUES(?, ?, ?, ?) ON CONFLICT(date) DO UPDATE SET breakfast=coalesce(excluded.breakfast, breakfast), lunch=coalesce(excluded.lunch, lunch), dinner=coalesce(excluded.dinner, dinner)").run(req.body.date, req.body.breakfast, req.body.lunch, req.body.dinner);
+router.post('/food-plan', async (req, res) => {
+  await FoodPlan.upsert(
+    {
+      date: req.body.date,
+      breakfast: req.body.breakfast,
+      lunch: req.body.lunch,
+      dinner: req.body.dinner,
+    },
+    {
+      where: {
+        date: req.body.date,
+      },
+    },
+  );
 
   res.send({ message: 'Data posted successfully.' });
 });
 
-router.get('/notes', function(req, res) {
-  const rows = db.prepare("SELECT * FROM notes WHERE DATE(date) >= DATE(?, 'weekday 6', '-6 days') AND DATE(date) <= DATE(?, 'weekday 6')").get(req.query.date, req.query.date);
-  res.json(rows);
+router.get('/note', async (req, res) => {
+  const date = req.query.date ? new Date(req.query.date) : new Date();
+  const notes = await Note.findOne({
+    where: {
+      date: {
+        [Op.between]: [getPreviousSunday(date), getNextSaturday(date)],
+      },
+    },
+  });
+  res.json(notes);
 });
 
-router.post('/notes', function(req, res) {
-  const result = db.prepare("INSERT INTO notes(date, content) VALUES(?, ?) ON CONFLICT(date) DO UPDATE SET content=coalesce(excluded.content, content)").run(req.body.date, req.body.content);
+router.post('/note', async (req, res) => {
+  await Note.upsert(
+    {
+      date: req.body.date,
+      content: req.body.content,
+    },
+    {
+      where: {
+        date: req.body.date,
+      },
+    },
+  );
 
   res.send({ message: 'Data posted successfully.' });
 });
 
-router.get('/todo', (req, res) => {
-  const rows = db.prepare("SELECT * FROM todos WHERE DATE(date) >= DATE(?, 'weekday 6', '-6 days') AND DATE(date) <= DATE(?, 'weekday 6')").all(req.query.date, req.query.date);
-  res.json(rows);
+// Handles all task types (food, shopping, and general)
+router.get('/task', async (req, res) => {
+  const date = req.query.date ? new Date(req.query.date) : false;
+  const tasks = await Task.findAll({
+    where: date
+      ? {
+        date: {
+          [Op.between]: [getPreviousSunday(date), getNextSaturday(date)],
+        },
+        type: req.query.type,
+      }
+      : { type: req.query.type },
+  });
+  res.json(tasks);
 });
 
-router.post('/todo', function(req, res) {
-  const result = db.prepare("INSERT INTO todos(content, done, date) VALUES(?, ?, ?)").run(req.body.content, +req.body.done, req.body.date);
+router.post('/task', async (req, res) => {
+  const task = await Task.create({
+    date: req.body.date,
+    content: req.body.content,
+    done: req.body.done,
+    person: req.body.person,
+    type: req.body.type,
+    dueDate: req.body.dueDate,
+  });
 
-  console.log(result);
-
-  res.send({ message: 'Data posted successfully.', id: result.lastInsertRowid });
+  res.send({
+    message: 'Data posted successfully.',
+    id: task.id,
+  });
 });
 
-router.put('/todo', (req, res) => {
-  const result = db.prepare("UPDATE todos SET done=? WHERE id=?").run(+req.body.done, req.body.id); 
+router.put('/task', async (req, res) => {
+  await Task.update(
+    {
+      date: req.body.date,
+      content: req.body.content,
+      done: req.body.done,
+      person: req.body.person,
+      type: req.body.type,
+      dueDate: req.body.dueDate,
+    },
+    {
+      where: {
+        id: req.body.id,
+      },
+    },
+  );
 
   res.send({ message: 'Data posted successfully.' });
 });
 
-router.delete('/todo', (req, res) => {
-  const result = db.prepare("DELETE FROM todos WHERE id=?").run(req.query.id);
+router.delete('/task', async (req, res) => {
+  await Task.destroy({ where: { id: req.query.id } });
 
   res.send({ message: 'Data posted successfully.' });
 });
 
-router.get('/shopping', (req, res) => {
-  const rows = db.prepare("SELECT * FROM shopping WHERE DATE(date) >= DATE(?, 'weekday 6', '-6 days') AND DATE(date) <= DATE(?, 'weekday 6')").all(req.query.date, req.query.date);
-  res.json(rows);
+router.get('/user/:id?', async (req, res) => {
+  try {
+    const response = await callAuth0Api({
+      endpoint: req.params.id ? `users/${req.params.id}` : 'users',
+    });
+    if (!Array.isArray(response)) {
+      const user = {
+        email: response.email,
+        name: response.name,
+        given_name: response.given_name,
+        family_name: response.family_name,
+        id: response.user_id,
+      };
+      return res.json(user);
+    }
+    const users = response.map((user) => ({
+      email: user.email,
+      name: user.name,
+      given_name: user.given_name,
+      family_name: user.family_name,
+      id: user.user_id,
+    }));
+    return res.json(users);
+  } catch (error) {
+    return res.status(500).send({ error: 'Unexpected error retrieving users.' });
+  }
 });
 
-router.post('/shopping', function(req, res) {
-  const result = db.prepare("INSERT INTO shopping(content, done, date) VALUES(?, ?, ?)").run(req.body.content, +req.body.done, req.body.date);
-
-  console.log(result);
-
-  res.send({ message: 'Data posted successfully.', id: result.lastInsertRowid });
+router.put('/user/:id', async (req, res) => {
+  const data = pick(req.body, ['given_name', 'family_name']);
+  try {
+    await callAuth0Api({
+      method: 'PATCH',
+      endpoint: `users/${req.params.id}`,
+      data,
+    });
+    res.send({ message: 'User updated sucessfully.' });
+  } catch (error) {
+    res.status(500).send({ error: 'Unexpected error updating user.' });
+  }
 });
 
-router.put('/shopping', (req, res) => {
-  const result = db.prepare("UPDATE shopping SET done=? WHERE id=?").run(+req.body.done, req.body.id); 
-
-  res.send({ message: 'Data posted successfully.' });
+router.get('/recipe', async (req, res) => {
+  const recipes = await Recipe.findAll();
+  res.json(recipes);
 });
 
-router.delete('/shopping', (req, res) => {
-  const result = db.prepare("DELETE FROM shopping WHERE id=?").run(req.query.id);
-
-  res.send({ message: 'Data posted successfully.' });
-});
-
-router.get('/recipe', (req, res) => {
-  const rows = db.prepare("SELECT * FROM recipes").all();
-  res.json(rows);
-});
-
-router.post('/recipe', async function(req, res) {
+router.post('/recipe', async (req, res) => {
   const urlExists = await urlExist(req.body.url.trim());
 
   if (!urlExists) {
@@ -97,41 +231,54 @@ router.post('/recipe', async function(req, res) {
   }
 
   try {
-    const previewData = await linkPreviewGenerator(req.body.url.trim());
+    const previewData = await getMetaData(req.body.url.trim());
     console.log(previewData);
 
-    const result = db.prepare("INSERT INTO recipes(url, title, description, image, domain, category_id) VALUES(?, ?, ?, ?, ?, ?)").run(req.body.url.trim(), previewData.title, previewData.description, previewData.img, previewData.domain, req.body.category);
+    const recipe = await Recipe.create({
+      url: req.body.url.trim(),
+      title: previewData.title,
+      description: previewData.description,
+      image: previewData.image,
+      domain: new URL(req.body.url.trim()).hostname.replace('www.', ''),
+    });
+    const associatedCategory = await RecipeCategory.findByPk(req.body.category);
+    if (associatedCategory) {
+      recipe.setRecipeCategory(associatedCategory);
+    }
 
-    console.log(result);
-
-    res.send({ message: 'Data posted successfully.', record: { id: result.lastInsertRowid, url: req.body.url, category_id: req.body.category, ...previewData, image: previewData.img } });
-  } catch {
-    res.send({ error: 'URL is not valid.' });
+    res.send({
+      message: 'Data posted successfully.',
+      record: recipe,
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({ error: 'Unexpected error adding recipe.' });
   }
 });
 
-router.delete('/recipe', (req, res) => {
-  const result = db.prepare("DELETE FROM recipes WHERE id=?").run(req.query.id);
-
+router.delete('/recipe', async (req, res) => {
+  await Recipe.destroy({ where: { id: req.query.id } });
   res.send({ message: 'Data posted successfully.' });
 });
 
-router.get('/recipe-category', (req, res) => {
-  const rows = db.prepare("SELECT * FROM recipe_categories").all();
-  res.json(rows);
+router.get('/recipe-category', async (req, res) => {
+  const categories = await RecipeCategory.findAll();
+  res.json(categories);
 });
 
-router.post('/recipe-category', function(req, res) {
-  const result = db.prepare("INSERT INTO recipe_categories(name) VALUES(?)").run(req.body.name);
+router.post('/recipe-category', async (req, res) => {
+  const category = await RecipeCategory.create({
+    name: req.body.name,
+  });
 
-  console.log(result);
-
-  res.send({ message: 'Data posted successfully.', id: result.lastInsertRowid });
+  res.send({
+    message: 'Data posted successfully.',
+    id: category.id,
+  });
 });
 
-router.delete('/recipe-category', (req, res) => {
-  const result = db.prepare("DELETE FROM recipe_categories WHERE id=?").run(req.query.id);
-
+router.delete('/recipe-category', async (req, res) => {
+  await RecipeCategory.destroy({ where: { id: req.query.id } });
   res.send({ message: 'Data posted successfully.' });
 });
 
