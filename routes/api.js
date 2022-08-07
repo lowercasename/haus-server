@@ -1,12 +1,9 @@
 import express from "express";
-
 import urlExist from "url-exist";
 import getMetaData from "metadata-scraper";
 
-import { Sequelize, DataTypes, Op } from "sequelize";
 import callAuth0Api from "../lib/auth0.js";
-
-const router = express.Router();
+import { Sequelize, DataTypes, Op } from "sequelize";
 
 const sequelize = new Sequelize({
   dialect: "sqlite",
@@ -43,7 +40,12 @@ const Recipe = sequelize.define("Recipe", {
 });
 RecipeCategory.hasMany(Recipe);
 Recipe.belongsTo(RecipeCategory);
+
 await sequelize.sync();
+
+export { FoodPlan, Note, Task, Recipe, RecipeCategory };
+
+const router = express.Router();
 
 const getPreviousSunday = (date = new Date()) => {
   if (date.getDay() === 0) return date;
@@ -101,6 +103,7 @@ router.get("/note", async (req, res) => {
       },
     },
   });
+  console.log(notes);
   res.json(notes);
 });
 
