@@ -66,7 +66,6 @@ const pick = (obj, keys) =>
     .reduce((res, o) => Object.assign(res, o), {});
 
 router.get("/food-plan", async (req, res) => {
-  console.log(req.query);
   const date = req.query.date ? new Date(req.query.date) : new Date();
   const foodPlans = await FoodPlan.findAll({
     where: {
