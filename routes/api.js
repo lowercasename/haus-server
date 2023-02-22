@@ -1,6 +1,7 @@
 import express from "express";
 import urlExist from "url-exist";
 import getMetaData from "metadata-scraper";
+import { startOfWeek, endOfWeek } from "date-fns";
 
 import callAuth0Api from "../lib/auth0.js";
 import { Sequelize, DataTypes, Op } from "sequelize";
@@ -40,6 +41,18 @@ const Recipe = sequelize.define("Recipe", {
 });
 RecipeCategory.hasMany(Recipe);
 Recipe.belongsTo(RecipeCategory);
+const Reminder = sequelize.define("Reminder", {
+  // Acts as the 'start date' from which to calculate repeating reminders
+  date: { type: DataTypes.DATE, allowNull: false },
+  content: DataTypes.TEXT,
+  isRepeating: DataTypes.BOOLEAN,
+  person: DataTypes.STRING,
+  repeatUnit: {
+    type: DataTypes.ENUM("day", "week", "month"),
+    allowNull: false,
+  },
+  repeatInterval: DataTypes.INTEGER, // Repeat every N units
+});
 
 await sequelize.sync();
 
@@ -47,29 +60,21 @@ export { FoodPlan, Note, Task, Recipe, RecipeCategory };
 
 const router = express.Router();
 
-const getPreviousSunday = (date = new Date()) => {
-  if (date.getDay() === 0) return date;
-  const previousSunday = new Date();
-  previousSunday.setDate(date.getDate() - date.getDay());
-  return previousSunday;
-};
-const getNextSaturday = (date = new Date()) => {
-  const previousSunday = getPreviousSunday(date);
-  const nextSaturday = new Date(previousSunday);
-  nextSaturday.setDate(previousSunday.getDate() + 6);
-  return nextSaturday;
-};
 const pick = (obj, keys) =>
   keys
     .map((k) => (k in obj ? { [k]: obj[k] } : {}))
     .reduce((res, o) => Object.assign(res, o), {});
 
 router.get("/food-plan", async (req, res) => {
+  console.log(req.query);
   const date = req.query.date ? new Date(req.query.date) : new Date();
   const foodPlans = await FoodPlan.findAll({
     where: {
       date: {
-        [Op.between]: [getPreviousSunday(date), getNextSaturday(date)],
+        [Op.between]: [
+          startOfWeek(date, { weekStartsOn: 1 }),
+          endOfWeek(date, { weekStartsOn: 1 }),
+        ],
       },
     },
   });
@@ -96,14 +101,16 @@ router.post("/food-plan", async (req, res) => {
 
 router.get("/note", async (req, res) => {
   const date = req.query.date ? new Date(req.query.date) : new Date();
+  // For notes, the start of the week is Sunday and the end is Saturday.
+  const s = startOfWeek(date);
+  const e = endOfWeek(date);
   const notes = await Note.findOne({
     where: {
       date: {
-        [Op.between]: [getPreviousSunday(date), getNextSaturday(date)],
+        [Op.between]: [s, e],
       },
     },
   });
-  console.log(notes);
   res.json(notes);
 });
 
@@ -126,11 +133,12 @@ router.post("/note", async (req, res) => {
 // Handles all task types (food, shopping, and general)
 router.get("/task", async (req, res) => {
   const date = req.query.date ? new Date(req.query.date) : false;
+  // For tasks, the start of the week is Monday and the end is Sunday.
   const tasks = await Task.findAll({
     where: date
       ? {
           date: {
-            [Op.between]: [getPreviousSunday(date), getNextSaturday(date)],
+            [Op.between]: [startOfWeek(date), endOfWeek(date)],
           },
           type: req.query.type,
         }
@@ -287,6 +295,49 @@ router.post("/recipe-category", async (req, res) => {
 router.delete("/recipe-category", async (req, res) => {
   await RecipeCategory.destroy({ where: { id: req.query.id } });
   res.send({ message: "Data posted successfully." });
+});
+
+router.get("/reminder", async (req, res) => {
+  const reminders = await Reminder.findAll();
+  res.json(reminders);
+});
+
+router.post("/reminder", async (req, res) => {
+  const reminder = await Reminder.create({
+    date: req.body.date,
+    content: req.body.content,
+    isRepeating: req.body.isRepeating,
+    repeatUnit: req.body.repeatUnit,
+    repeatInterval: req.body.repeatInterval, // Repeat every N units
+  });
+  res.send({
+    message: "Data posted successfully.",
+    id: reminder.id,
+  });
+});
+
+router.put("/reminder", async (req, res) => {
+  // await Task.update(
+  //   {
+  //     date: req.body.date,
+  //     content: req.body.content,
+  //     done: req.body.done,
+  //     person: req.body.person,
+  //     type: req.body.type,
+  //     dueDate: req.body.dueDate,
+  //   },
+  //   {
+  //     where: {
+  //       id: req.body.id,
+  //     },
+  //   }
+  // );
+  // res.send({ message: "Data posted successfully." });
+});
+
+router.delete("/reminder", async (req, res) => {
+  // await Task.destroy({ where: { id: req.query.id } });
+  // res.send({ message: "Data posted successfully." });
 });
 
 export default router;
