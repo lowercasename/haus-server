@@ -53,12 +53,74 @@ const Reminder = sequelize.define("Reminder", {
   },
   repeatInterval: DataTypes.INTEGER, // Repeat every N units
 });
+const RecipeIdea = sequelize.define("RecipeIdea", {
+  name: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true
+  },
+  body: DataTypes.TEXT,
+});
 
-await sequelize.sync();
+const MainIngredient = sequelize.define("MainIngredient", {
+  name: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true
+  },
+});
+
+const RecipeTag = sequelize.define("RecipeTag", {
+  name: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true
+  },
+});
+
+RecipeCategory.hasMany(RecipeIdea);
+RecipeIdea.belongsTo(RecipeCategory);
+
+RecipeIdea.belongsToMany(MainIngredient, { through: 'RecipeIdeaIngredients' });
+MainIngredient.belongsToMany(RecipeIdea, { through: 'RecipeIdeaIngredients' });
+
+RecipeIdea.belongsToMany(RecipeTag, { through: 'RecipeIdeaTags' });
+RecipeTag.belongsToMany(RecipeIdea, { through: 'RecipeIdeaTags' });
+
+// await sequelize.sync();
 
 export { FoodPlan, Note, Task, Recipe, RecipeCategory };
 
 const router = express.Router();
+
+// Helper function to find or create tags and ingredients
+async function findOrCreateItems(items, Model) {
+  return Promise.all(items.map(item =>
+    Model.findOrCreate({ where: { name: item } })
+      .then(([record]) => record)
+  ));
+}
+
+// Helper function to cleanup orphaned items
+async function cleanupOrphanedItems(items, Model) {
+  for (const item of items) {
+    const transaction = await sequelize.transaction();
+    try {
+      const record = await Model.findByPk(item.id, { transaction });
+      if (record) {
+        const associatedRecipes = await record.getRecipeIdeas({ transaction });
+        if (associatedRecipes.length === 0) {
+          await record.destroy({ transaction });
+        }
+      }
+      await transaction.commit();
+    } catch (error) {
+      await transaction.rollback();
+      console.error(`Error cleaning up orphaned ${Model.name}:`, error);
+    }
+  }
+}
+
 
 const pick = (obj, keys) =>
   keys
@@ -136,11 +198,11 @@ router.get("/task", async (req, res) => {
   const tasks = await Task.findAll({
     where: date
       ? {
-          date: {
-            [Op.between]: [startOfWeek(date), endOfWeek(date)],
-          },
-          type: req.query.type,
-        }
+        date: {
+          [Op.between]: [startOfWeek(date), endOfWeek(date)],
+        },
+        type: req.query.type,
+      }
       : { type: req.query.type },
   });
   res.json(tasks);
@@ -337,6 +399,211 @@ router.put("/reminder", async (req, res) => {
 router.delete("/reminder", async (req, res) => {
   // await Task.destroy({ where: { id: req.query.id } });
   // res.send({ message: "Data posted successfully." });
+});
+
+// GET all recipe ideas with optional filtering
+router.get("/recipe-ideas", async (req, res) => {
+  try {
+    const { tags, ingredients, search, category } = req.query;
+    let where = {};
+    let recipeIdeasIds = null;
+
+    if (search) {
+      where.name = { [Op.like]: `%${search}%` };
+    }
+
+    if (category) {
+      where.RecipeCategoryId = category;
+    }
+
+    // If tags or ingredients are specified, we need to filter the RecipeIdeas first
+    if (tags || ingredients) {
+      let tagWhere = {};
+      let ingredientWhere = {};
+
+      if (tags) {
+        tagWhere = { name: { [Op.in]: tags.split(',') } };
+      }
+
+      if (ingredients) {
+        ingredientWhere = { name: { [Op.in]: ingredients.split(',') } };
+      }
+
+      // Find IDs of RecipeIdeas that match the tag and ingredient filters
+      const filteredIds = await RecipeIdea.findAll({
+        attributes: ['id'],
+        where,
+        include: [
+          tags ? { model: RecipeTag, where: tagWhere, attributes: [] } : null,
+          ingredients ? { model: MainIngredient, where: ingredientWhere, attributes: [] } : null
+        ].filter(Boolean),
+        raw: true
+      });
+
+      recipeIdeasIds = filteredIds.map(idea => idea.id);
+
+      // If no recipes match the filters, return an empty array early
+      if (recipeIdeasIds.length === 0) {
+        return res.json([]);
+      }
+
+      // Add the filtered IDs to the where clause
+      where.id = { [Op.in]: recipeIdeasIds };
+    }
+
+    // Now fetch the full RecipeIdea data including all tags and ingredients
+    const recipeIdeas = await RecipeIdea.findAll({
+      where,
+      include: [
+        {
+          model: RecipeCategory,
+          attributes: ['id', 'name']
+        },
+        {
+          model: RecipeTag,
+          attributes: ['id', 'name'],
+          through: { attributes: [] }
+        },
+        {
+          model: MainIngredient,
+          attributes: ['id', 'name'],
+          through: { attributes: [] }
+        }
+      ],
+      attributes: ['id', 'name', 'body', 'RecipeCategoryId']
+    });
+
+    res.json(recipeIdeas);
+  } catch (error) {
+    console.error('Error fetching recipe ideas:', error);
+    res.status(500).json({ error: "Error fetching recipe ideas" });
+  }
+});
+
+// POST a new recipe idea
+router.post("/recipe-ideas", async (req, res) => {
+  try {
+    const { name, RecipeCategoryId, MainIngredients, RecipeTags, body } = req.body;
+    console.log(req.body);
+
+    const recipeIdea = await RecipeIdea.create({ name, body, RecipeCategoryId });
+
+    if (MainIngredients) {
+      const mainIngredientsToArrayOfStrings = MainIngredients.map(ingredient => ingredient.name);
+      const ingredientRecords = await findOrCreateItems(mainIngredientsToArrayOfStrings, MainIngredient);
+      await recipeIdea.setMainIngredients(ingredientRecords);
+    }
+
+    if (RecipeTags) {
+      const tagsToArrayOfStrings = RecipeTags.map(tag => tag.name);
+      const tagRecords = await findOrCreateItems(tagsToArrayOfStrings, RecipeTag);
+      await recipeIdea.setRecipeTags(tagRecords);
+    }
+
+    res.status(201).json(recipeIdea);
+  } catch (error) {
+    console.error('Error creating recipe idea:', error);
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      res.status(400).json({ error: "Recipe idea with this name already exists" });
+    } else {
+      res.status(500).json({ error: "Error creating recipe idea" });
+    }
+  }
+});
+
+// PUT (update) a recipe idea
+router.put("/recipe-ideas/:id", async (req, res) => {
+  const { name, RecipeCategoryId, MainIngredients, RecipeTags, body } = req.body;
+  console.log(req.body);
+
+  try {
+    const recipeIdea = await RecipeIdea.findByPk(req.params.id, {
+      include: [RecipeTag, MainIngredient]
+    });
+
+    if (!recipeIdea) {
+      return res.status(404).json({ error: "Recipe idea not found" });
+    }
+
+    // Perform the main update
+    await recipeIdea.update({ name, body, RecipeCategoryId });
+
+    // Update ingredients
+    if (MainIngredients) {
+      const mainIngredientsToArrayOfStrings = MainIngredients.map(ingredient => ingredient.name);
+      const ingredientRecords = await findOrCreateItems(mainIngredientsToArrayOfStrings, MainIngredient);
+      await recipeIdea.setMainIngredients(ingredientRecords);
+    }
+
+    // Update tags
+    if (RecipeTags) {
+      const tagsToArrayOfStrings = RecipeTags.map(tag => tag.name);
+      const tagRecords = await findOrCreateItems(tagsToArrayOfStrings, RecipeTag);
+      await recipeIdea.setRecipeTags(tagRecords);
+    }
+
+    // Fetch the updated recipe idea
+    const updatedRecipeIdea = await RecipeIdea.findByPk(req.params.id, {
+      include: [RecipeTag, MainIngredient]
+    });
+
+    // Perform cleanup operations asynchronously
+    const currentIngredients = recipeIdea.MainIngredients;
+    const currentTags = recipeIdea.RecipeTags;
+    const newIngredientIds = updatedRecipeIdea.MainIngredients.map(i => i.id);
+    const newTagIds = updatedRecipeIdea.RecipeTags.map(t => t.id);
+
+    const removedIngredients = currentIngredients.filter(i => !newIngredientIds.includes(i.id));
+    const removedTags = currentTags.filter(t => !newTagIds.includes(t.id));
+
+    cleanupOrphanedItems(removedIngredients, MainIngredient).catch(console.error);
+    cleanupOrphanedItems(removedTags, RecipeTag).catch(console.error);
+
+    res.json(updatedRecipeIdea);
+  } catch (error) {
+    console.error('Error updating recipe idea:', error);
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      res.status(400).json({ error: "Recipe idea with this name already exists" });
+    } else {
+      res.status(500).json({ error: "Error updating recipe idea" });
+    }
+  }
+});
+
+// DELETE a recipe idea
+router.delete("/recipe-ideas/:id", async (req, res) => {
+  try {
+    const recipeIdea = await RecipeIdea.findByPk(req.params.id);
+
+    if (!recipeIdea) {
+      return res.status(404).json({ error: "Recipe idea not found" });
+    }
+
+    await recipeIdea.destroy();
+    res.json({ message: "Recipe idea deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ error: "Error deleting recipe idea" });
+  }
+});
+
+// GET all recipe tags
+router.get("/recipe-tags", async (req, res) => {
+  try {
+    const tags = await RecipeTag.findAll();
+    res.json(tags);
+  } catch (error) {
+    res.status(500).json({ error: "Error fetching recipe tags" });
+  }
+});
+
+// GET all main ingredients
+router.get("/main-ingredients", async (req, res) => {
+  try {
+    const ingredients = await MainIngredient.findAll();
+    res.json(ingredients);
+  } catch (error) {
+    res.status(500).json({ error: "Error fetching main ingredients" });
+  }
 });
 
 export default router;
