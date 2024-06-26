@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from "express";
 import urlExist from "url-exist";
 import getMetaData from "metadata-scraper";
@@ -8,8 +9,10 @@ import { Sequelize, DataTypes, Op } from "sequelize";
 
 const sequelize = new Sequelize({
   dialect: "sqlite",
-  storage: "haus.db",
+  storage: process.env.DB_PATH,
+  transactionType: "IMMEDIATE",
 });
+
 const FoodPlan = sequelize.define("FoodPlan", {
   date: { type: DataTypes.DATE, allowNull: false, unique: true },
   breakfast: DataTypes.TEXT,
@@ -334,7 +337,7 @@ router.post("/recipe", async (req, res) => {
 
 router.delete("/recipe", async (req, res) => {
   await Recipe.destroy({ where: { id: req.query.id } });
-  res.send({ message: "Data posted successfully." });
+  res.send({ message: "Recipe deleted." });
 });
 
 router.get("/recipe-category", async (req, res) => {
