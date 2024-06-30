@@ -489,7 +489,7 @@ router.post("/recipe-ideas", async (req, res) => {
     const { name, RecipeCategoryId, MainIngredients, RecipeTags, body } = req.body;
     console.log(req.body);
 
-    const recipeIdea = await RecipeIdea.create({ name, body, RecipeCategoryId });
+    const recipeIdea = await RecipeIdea.create({ name, body, RecipeCategoryId: RecipeCategoryId === '' ? null : RecipeCategoryId });
 
     if (MainIngredients) {
       const mainIngredientsToArrayOfStrings = MainIngredients.map(ingredient => ingredient.name);
@@ -529,7 +529,7 @@ router.put("/recipe-ideas/:id", async (req, res) => {
     }
 
     // Perform the main update
-    await recipeIdea.update({ name, body, RecipeCategoryId });
+    await recipeIdea.update({ name, body, RecipeCategoryId: RecipeCategoryId === '' ? null : RecipeCategoryId });
 
     // Update ingredients
     if (MainIngredients) {
@@ -576,13 +576,23 @@ router.put("/recipe-ideas/:id", async (req, res) => {
 // DELETE a recipe idea
 router.delete("/recipe-ideas/:id", async (req, res) => {
   try {
-    const recipeIdea = await RecipeIdea.findByPk(req.params.id);
+    const recipeIdea = await RecipeIdea.findByPk(req.params.id, {
+      include: [RecipeTag, MainIngredient]
+    });
 
     if (!recipeIdea) {
       return res.status(404).json({ error: "Recipe idea not found" });
     }
 
     await recipeIdea.destroy();
+
+    // Perform cleanup operations asynchronously
+    const currentIngredients = recipeIdea.MainIngredients;
+    const currentTags = recipeIdea.RecipeTags;
+
+    cleanupOrphanedItems(currentIngredients, MainIngredient).catch(console.error);
+    cleanupOrphanedItems(currentTags, RecipeTag).catch(console.error);
+
     res.json({ message: "Recipe idea deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: "Error deleting recipe idea" });
